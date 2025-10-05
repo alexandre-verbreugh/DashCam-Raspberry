@@ -25,6 +25,10 @@ Système de dashcam automatique pour enregistrer un trajet.
 
 ### Installation rapide
 ```bash
+# 0. Installer git
+sudo apt update
+sudo apt install git -y
+
 # 1. Cloner le dépôt
 git clone https://github.com/TON_USERNAME/dashcam-raspberry-pi.git
 cd dashcam-raspberry-pi
