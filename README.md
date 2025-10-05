@@ -22,9 +22,6 @@ Système de dashcam automatique pour enregistrer un trajet.
 - Alimentation 5V 2.5A minimum
 - Carte SD 16 Go minimum
 
-## Installation
-
-Voir le fichier [DOCUMENTATION.md](DOCUMENTATION.md) pour l'installation complète.
 
 ### Installation rapide
 ```bash
@@ -36,10 +33,20 @@ cd dashcam-raspberry-pi
 sudo apt update
 sudo apt install ffmpeg exfat-fuse exfat-utils -y
 
-# 3. Configurer les clés USB (voir documentation)
+## 4. Installer et activer le service SystemD
 
-# 4. Installer le service
+Le service SystemD permet au script de démarrer automatiquement au boot du Raspberry Pi.
+```bash
+# Copier le fichier de configuration du service vers le dossier système
+# Ce fichier dit à SystemD comment démarrer et gérer l'application
 sudo cp dashcam.service /etc/systemd/system/
+
+# Recharger la configuration de SystemD pour qu'il prenne en compte le nouveau service
 sudo systemctl daemon-reload
+
+# Activer le service pour qu'il démarre automatiquement au boot
+# Cela crée un lien symbolique qui lance le service au démarrage
 sudo systemctl enable dashcam.service
+
+# Démarrer le service immédiatement (sans attendre le prochain redémarrage)
 sudo systemctl start dashcam.service
