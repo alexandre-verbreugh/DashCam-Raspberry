@@ -30,7 +30,7 @@ sudo apt update
 sudo apt install git -y
 
 # 1. Cloner le dépôt
-git clone https://github.com/TON_USERNAME/dashcam-raspberry-pi.git
+git clone https://github.com/TON_USERNAME/dashcam-raspberry-pi.gi
 cd dashcam-raspberry-pi
 
 # 2. Installer les dépendances

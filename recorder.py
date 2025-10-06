@@ -28,6 +28,10 @@ VIDEO_HEIGHT = 720   # Hauteur : 720 pixels
 # Périphérique de la webcam USB détecté par le système
 DEVICE = "/dev/video0"
 
+# Périphérique audio (microphone USB)
+# hw:1,0 signifie carte 1, device 0 (à adapter selon ton matériel)
+AUDIO_DEVICE = "hw:1,0"
+
 # Temps d'attente entre deux enregistrements (en secondes)
 # 1 seconde permet au système de respirer entre deux vidéos
 INTERVAL = 1
@@ -36,6 +40,11 @@ INTERVAL = 1
 # Avec 2 Go, la clé sera utilisée jusqu'à ce qu'il reste seulement 2 Go libres
 # Cela permet de stocker environ 200 vidéos (~16-17h) sur une clé de 64 Go
 MIN_FREE_SPACE_GB = 2
+
+# Variable globale pour se souvenir de la dernière clé utilisée
+# Cela évite de basculer entre les clés inutilement quand les deux ont
+# approximativement le même espace libre
+LAST_USED_USB = None
 
 
 # ============================================================================
@@ -73,13 +82,13 @@ def get_free_space_gb(path):
 # Rôle : Choisir automatiquement quelle clé USB utiliser pour enregistrer
 # Logique : 
 #   1. Vérifie les deux clés USB
-#   2. Filtre celles qui ont au moins MIN_FREE_SPACE_GB (2 Go) de libre
-#   3. Choisit celle avec le PLUS d'espace disponible
-#   4. Si aucune n'a assez d'espace, prend celle avec le plus d'espace quand même
+#   2. Si une clé était déjà utilisée et a encore assez d'espace, continue dessus
+#   3. Sinon, choisit celle avec le PLUS d'espace disponible
 # Retourne : Le chemin de la clé sélectionnée (ex: "/mnt/usb1"), ou None si aucune
 # ============================================================================
 def select_usb_path():
     """Sélectionne la clé USB avec le plus d'espace disponible"""
+    global LAST_USED_USB  # Accès à la variable globale
     
     # Liste qui va contenir les clés disponibles et leur espace libre
     # Format : [(chemin, espace_en_Go), ...]
@@ -94,33 +103,31 @@ def select_usb_path():
             # Calculer l'espace libre sur cette clé
             free_space = get_free_space_gb(usb_path)
             
-            # Si la clé a assez d'espace (au moins MIN_FREE_SPACE_GB = 2 Go)
-            if free_space >= MIN_FREE_SPACE_GB:
-                # Ajouter cette clé à la liste des clés utilisables
-                available_usbs.append((usb_path, free_space))
-                
-                # Afficher l'espace disponible pour information
-                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
-                      f"{usb_path}: {free_space:.2f} Go disponibles")
+            # Ajouter cette clé à la liste (peu importe l'espace disponible)
+            available_usbs.append((usb_path, free_space))
+            
+            # Afficher l'espace disponible pour information
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
+                  f"{usb_path}: {free_space:.2f} Go disponibles")
     
-    # ---------- ÉTAPE 2 : Gérer le cas où aucune clé n'a assez d'espace ----------
+    # Si aucune clé n'est détectée, retourner None
     if not available_usbs:
-        # Afficher un avertissement : les deux clés sont presque pleines
         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
-              f"ATTENTION: Aucune clé n'a assez d'espace libre (< 2 Go)!")
-        
-        # Dans ce cas, on prend quand même celle avec le PLUS d'espace
-        # même si c'est moins de 2 Go (pour éviter de bloquer l'enregistrement)
-        for usb_path in USB_PATHS:
-            if os.path.exists(usb_path) and os.path.ismount(usb_path):
-                free_space = get_free_space_gb(usb_path)
-                available_usbs.append((usb_path, free_space))
-        
-        # Si vraiment aucune clé n'est détectée, retourner None
-        if not available_usbs:
-            return None
+              f"ERREUR: Aucune clé USB détectée")
+        return None
     
-    # ---------- ÉTAPE 3 : Choisir la meilleure clé ----------
+    # ---------- ÉTAPE 2 : Continuer sur la dernière clé si possible ----------
+    # Si une clé était déjà utilisée et a encore assez d'espace (>= MIN_FREE_SPACE_GB)
+    # on continue dessus au lieu de changer
+    # Cela évite de basculer inutilement entre les deux clés
+    if LAST_USED_USB:
+        for usb_path, free_space in available_usbs:
+            if usb_path == LAST_USED_USB and free_space >= MIN_FREE_SPACE_GB:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
+                      f"Continue sur: {usb_path}")
+                return usb_path
+    
+    # ---------- ÉTAPE 3 : Sinon, choisir celle avec le PLUS d'espace ----------
     # Trier la liste par espace disponible (du plus grand au plus petit)
     # lambda x: x[1] signifie "trier selon le 2ème élément du tuple (l'espace en Go)"
     # reverse=True signifie "ordre décroissant" (du plus grand au plus petit)
@@ -130,6 +137,9 @@ def select_usb_path():
     # [0] = premier élément de la liste
     # [0] = première valeur du tuple (le chemin, pas l'espace)
     selected_usb = available_usbs[0][0]
+    
+    # Mémoriser ce choix pour les prochains enregistrements
+    LAST_USED_USB = selected_usb
     
     # Afficher quelle clé a été choisie
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
@@ -141,12 +151,12 @@ def select_usb_path():
 # ============================================================================
 # FONCTION : record_video
 # ============================================================================
-# Rôle : Enregistrer UNE vidéo de 5 minutes sur la clé USB spécifiée
+# Rôle : Enregistrer UNE vidéo de 5 minutes avec audio sur la clé USB spécifiée
 # Paramètre : usb_path = chemin de la clé où enregistrer (ex: "/mnt/usb1")
 # Retourne : True si succès, False si erreur
 # ============================================================================
 def record_video(usb_path):
-    """Enregistre une vidéo MJPEG de 5 minutes"""
+    """Enregistre une vidéo MJPEG de 5 minutes avec audio"""
     
     # ---------- ÉTAPE 1 : Créer le nom du fichier ----------
     # Générer un horodatage au format : AAAAMMJJ_HHMMSS
@@ -167,24 +177,34 @@ def record_video(usb_path):
           f"Début enregistrement: {filename} sur {usb_path}")
     
     # ---------- ÉTAPE 2 : Préparer la commande ffmpeg ----------
-    # ffmpeg est le logiciel qui va capturer la vidéo depuis la webcam
-    # On construit la commande sous forme de liste de paramètres
+    # ffmpeg va capturer simultanément la vidéo ET l'audio
     cmd = [
-        "ffmpeg",                    # Le programme à exécuter
+        "ffmpeg",
         
-        # --- Paramètres d'ENTRÉE (webcam) ---
-        "-f", "v4l2",                # Format : Video4Linux2 (standard Linux pour webcam)
+        # --- ENTRÉE VIDÉO (webcam) ---
+        "-f", "v4l2",                # Format : Video4Linux2 (standard Linux)
         "-input_format", "mjpeg",    # Format d'entrée : MJPEG (Motion JPEG)
         "-video_size", f"{VIDEO_WIDTH}x{VIDEO_HEIGHT}",  # Résolution : 1280x720
-        "-i", DEVICE,                # Périphérique d'entrée : /dev/video0 (la webcam)
+        "-i", DEVICE,                # Périphérique vidéo : /dev/video0
         
-        # --- Paramètres de durée ---
+        # --- ENTRÉE AUDIO (microphone) ---
+        "-f", "alsa",                # Format audio : ALSA (Advanced Linux Sound Architecture)
+        "-i", AUDIO_DEVICE,          # Périphérique audio : hw:1,0 (micro USB)
+        
+        # --- DURÉE D'ENREGISTREMENT ---
         "-t", str(VIDEO_DURATION),   # Durée : 300 secondes (5 minutes)
         
-        # --- Paramètres de SORTIE (fichier vidéo) ---
-        "-c:v", "copy",              # Codec vidéo : "copy" = pas de ré-encodage,
-                                     # on copie le flux MJPEG tel quel (rapide)
-        "-f", "avi",                 # Format de fichier : AVI
+        # --- CODEC VIDÉO ---
+        "-c:v", "copy",              # Codec vidéo : "copy" = pas de ré-encodage
+                                     # On copie le flux MJPEG tel quel (rapide et fiable)
+        
+        # --- CODEC AUDIO ---
+        "-c:a", "pcm_s16le",         # Codec audio : PCM 16 bits Little Endian (non compressé)
+        "-ar", "44100",              # Sample rate : 44100 Hz (44.1 kHz, qualité CD)
+        "-ac", "1",                  # Canaux audio : 1 = Mono (mettre 2 pour stéréo)
+        
+        # --- FORMAT DE SORTIE ---
+        "-f", "avi",                 # Format conteneur : AVI (compatible avec MJPEG+PCM)
         
         filepath                     # Chemin complet du fichier de sortie
     ]
@@ -192,7 +212,7 @@ def record_video(usb_path):
     # ---------- ÉTAPE 3 : Lancer l'enregistrement ----------
     try:
         # subprocess.run() exécute la commande ffmpeg
-        # check=True : lève une exception si la commande échoue
+        # check=True : lève une exception si la commande échoue (code retour != 0)
         subprocess.run(cmd, check=True)
         
         # Si on arrive ici, l'enregistrement s'est bien terminé
@@ -201,7 +221,7 @@ def record_video(usb_path):
         return True
         
     except subprocess.CalledProcessError as e:
-        # Si ffmpeg plante, afficher l'erreur
+        # Si ffmpeg plante (webcam déconnectée, micro introuvable, etc.)
         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
               f"Erreur d'enregistrement: {e}")
         return False
@@ -212,14 +232,14 @@ def record_video(usb_path):
 # ============================================================================
 # Rôle : Boucle infinie qui enregistre des vidéos en continu
 # Logique :
-#   1. Choisir la meilleure clé USB (celle avec le plus d'espace)
-#   2. Enregistrer une vidéo de 5 minutes dessus
+#   1. Choisir la meilleure clé USB (ou continuer sur la même)
+#   2. Enregistrer une vidéo de 5 minutes avec audio dessus
 #   3. Attendre 1 seconde
 #   4. Recommencer à l'étape 1
 # ============================================================================
 def main():
     # Message de démarrage du système
-    print("=== Dashcam Recorder démarré (mode 2 clés USB) ===")
+    print("=== Dashcam Recorder démarré (mode 2 clés USB + audio) ===")
     
     # Boucle infinie : tourne sans fin jusqu'à l'arrêt du système
     while True:
@@ -240,13 +260,14 @@ def main():
             # Revenir au début de la boucle (ne pas enregistrer)
             continue
         
-        # ---------- ÉTAPE 2 : Enregistrer une vidéo ----------
+        # ---------- ÉTAPE 2 : Enregistrer une vidéo avec audio ----------
         # Appeler la fonction record_video() avec la clé sélectionnée
         record_video(usb_path)
         
         # ---------- ÉTAPE 3 : Petite pause ----------
         # Attendre 1 seconde avant le prochain enregistrement
         # Cela laisse le temps au système de libérer les ressources
+        # (fermer le fichier, libérer la webcam, etc.)
         time.sleep(INTERVAL)
         
         # La boucle repart au début : sélection de clé → enregistrement → pause...
