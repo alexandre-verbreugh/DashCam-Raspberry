@@ -30,7 +30,7 @@ DEVICE = "/dev/video0"
 
 # Périphérique audio (microphone USB)
 # hw:1,0 signifie carte 1, device 0 (à adapter selon ton matériel)
-AUDIO_DEVICE = "hw:1,0"
+AUDIO_DEVICE = "plughw:1,0"
 
 # Temps d'attente entre deux enregistrements (en secondes)
 # 1 seconde permet au système de respirer entre deux vidéos
